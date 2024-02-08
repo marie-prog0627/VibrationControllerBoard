@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        "nvs_flash.h": "c",
+        "esp_gatt_common_api.h": "c"
+    }
+}
