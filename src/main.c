@@ -5,14 +5,35 @@
 #include "esp_log.h"
 #include "esp_bt.h"
 #include "esp_bt_main.h"
+#include "unistd.h"
 #include "esp_gap_ble_api.h"
+#include "esp_gatts_api.h"
 #include "esp_gatt_defs.h"
 #include "esp_gatt_common_api.h"
 #include "esp_bt_device.h"
 #include "driver/gpio.h"
+#include "freertos/timers.h"
 
+#define TIMER_PERIOD pdMS_TO_TICKS(5000) // 5000ms = 5秒
 #define GATTS_TAG "BLE_GATTS"
 #define MY_DEVICE_NAME "VLE1"
+#define GAT_UUID 0x00A0
+#define GAT_NUM_HANDLE 2
+
+static uint16_t id_conn = 0xFFFF; // 接続IDの初期値（未接続を示す）
+static esp_gatt_if_t if_gatt = ESP_GATT_IF_NONE; // インターフェースIDの初期値
+static uint16_t char_handle = 0; // 特性ハンドルの初期値
+
+esp_gatt_srvc_id_t service_id = {
+    .id = {
+        .inst_id = 0x00,
+            .uuid = {
+                .len = ESP_UUID_LEN_16,
+                .uuid = {.uuid16 = GAT_UUID,},
+            },
+        },
+    .is_primary = true,
+};
 
 static esp_ble_adv_data_t adv_data = {
     .set_scan_rsp = false, // スキャン応答にこのアドバタイジングデータを使用しない
@@ -42,13 +63,52 @@ void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *par
     switch (event) {
     case ESP_GAP_BLE_ADV_DATA_SET_COMPLETE_EVT:
         esp_ble_gap_start_advertising(&adv_params);
+        ESP_LOGI("GAP", "Advertising.");
         break;
     default:
         break;
     }
 }
 
-void app_main(void) {
+static void gatts_event_handler(esp_gatts_cb_event_t event, 
+                                esp_gatt_if_t ifid, 
+                                esp_ble_gatts_cb_param_t *param) {
+
+    ESP_LOGI("GATT", "%d", event);
+
+    switch (event) {
+        case ESP_GATTS_REG_EVT:
+            if_gatt = ifid;
+            esp_ble_gatts_create_service(if_gatt, &service_id, GAT_NUM_HANDLE);
+            ESP_LOGI(GATTS_TAG, "Registered.\n");
+            break;
+        case ESP_GATTS_START_EVT:
+            ESP_LOGI(GATTS_TAG, "Started.\n");
+            break;
+        case ESP_GATTS_CONNECT_EVT:
+            id_conn = param->connect.conn_id;
+            ESP_LOGI(GATTS_TAG, "Connected.\n");
+            break;
+        case ESP_GATTS_ADD_CHAR_EVT:
+            char_handle = param->add_char.attr_handle;
+            ESP_LOGI(GATTS_TAG, "Characteristic Added. \n");
+            break;
+        case ESP_GATTS_DISCONNECT_EVT:
+            ESP_LOGI(GATTS_TAG, "Disconnected.\n");
+            esp_ble_gap_start_advertising(&adv_params);
+            break;
+        default:
+            break;
+    }
+}
+
+void timer_callback(TimerHandle_t xTimer) {
+    char message[] = "Hello from ESP32!";
+    esp_ble_gatts_send_indicate(if_gatt, id_conn, char_handle,
+                                sizeof(message), (uint8_t *)message, false);
+}
+
+void bt_initialize() {
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
       ESP_ERROR_CHECK(nvs_flash_erase());
@@ -59,6 +119,7 @@ void app_main(void) {
     ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT));
 
     esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
+
     ret = esp_bt_controller_init(&bt_cfg);
     if (ret) {
         ESP_LOGE(GATTS_TAG, "%s initialize controller failed: %s", __func__, esp_err_to_name(ret));
@@ -83,7 +144,21 @@ void app_main(void) {
         return;
     }
 
+    esp_ble_gatts_register_callback(gatts_event_handler);
+
+    esp_ble_gatts_app_register(GAT_UUID);
+
     esp_ble_gap_set_device_name(MY_DEVICE_NAME);
     esp_ble_gap_register_callback(gap_event_handler);
     esp_ble_gap_config_adv_data(&adv_data);
+}
+
+void app_main(void) {
+
+    sleep(10);
+
+    bt_initialize();
+
+    // TimerHandle_t timer = xTimerCreate("msgTimer", TIMER_PERIOD, pdTRUE, (void *)0, timer_callback);
+    // xTimerStart(timer, 0);
 }
