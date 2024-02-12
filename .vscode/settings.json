@@ -2,6 +2,8 @@
     "files.associations": {
         "nvs_flash.h": "c",
         "esp_gatt_common_api.h": "c",
-        "esp_gap_ble_api.h": "c"
+        "esp_gap_ble_api.h": "c",
+        "ledc.h": "c",
+        "gpio.h": "c"
     }
 }

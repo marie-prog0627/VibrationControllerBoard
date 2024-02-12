@@ -14,6 +14,9 @@
 #include "driver/gpio.h"
 #include "freertos/timers.h"
 #include "string.h"
+#include "driver/ledc.h"
+#include "driver/gpio.h"
+#include "stdlib.h"
 
 #define TIMER_PERIOD pdMS_TO_TICKS(5000) // 5000ms = 5秒
 #define SID 0x0121
@@ -71,6 +74,26 @@ esp_attr_value_t gatt_char_src = {
     .attr_len     = 0,   // 初期値の長さ
     .attr_value   = NULL, // 初期値
 };
+
+// pwm設定
+ledc_timer_config_t ledc_timer = {
+    .duty_resolution = LEDC_TIMER_10_BIT, // 解像度は10ビット
+    .freq_hz = 5000, // 5 kHz
+    .speed_mode = LEDC_LOW_SPEED_MODE, // モード
+    .timer_num = LEDC_TIMER_0, // タイマー0を使用
+    .clk_cfg = LEDC_AUTO_CLK, // クロック設定（ESP-IDF v4.0以降で必要）
+};
+
+ledc_channel_config_t ledc_channel = {
+    .channel    = LEDC_CHANNEL_0,
+    .duty       = 0, // 初期デューティサイクル
+    .gpio_num   = 9, // GPIO9を使用
+    .speed_mode = LEDC_LOW_SPEED_MODE,
+    .hpoint     = 0,
+    .timer_sel  = LEDC_TIMER_0
+};
+
+// --- function
 
 void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param) {
     switch (event) {
@@ -131,6 +154,12 @@ static void gatts_event_handler(esp_gatts_cb_event_t event,
                 memcpy(char_value, param->write.value, param->write.len);
                 // 受信したデータをシリアル出力にprint
                 ESP_LOGI(GATTS_TAG, "Received data: %.*s", param->write.len, char_value);
+
+                int duty = atoi((const char *)char_value);
+
+                ledc_set_duty(ledc_channel.speed_mode, ledc_channel.channel, duty);
+                ledc_update_duty(ledc_channel.speed_mode, ledc_channel.channel);
+
             }
             break;
         case ESP_GATTS_DISCONNECT_EVT:
@@ -193,11 +222,17 @@ void bt_initialize() {
     esp_ble_gap_config_adv_data(&adv_data);
 }
 
+void pwm_initialize() {
+    ledc_timer_config(&ledc_timer);
+    ledc_channel_config(&ledc_channel);
+}
+
 void app_main(void) {
 
     sleep(10);
 
     bt_initialize();
+    pwm_initialize();
 
     // TimerHandle_t timer = xTimerCreate("msgTimer", TIMER_PERIOD, pdTRUE, (void *)0, timer_callback);
     // xTimerStart(timer, 0);
