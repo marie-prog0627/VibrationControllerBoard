@@ -116,6 +116,16 @@ static void gatts_event_handler(esp_gatts_cb_event_t event,
             ESP_LOGI(GATTS_TAG, "Characteristic Added. id: %d, uuid %d \n", char_handle, gat_uuids);
             break;
         case ESP_GATTS_WRITE_EVT:
+            esp_err_t err = esp_ble_gatts_send_response(ifid, 
+                                          param->write.conn_id,
+                                          param->write.trans_id,
+                                          ESP_GATT_OK, // ここに適切なステータスコードを設定
+                                          NULL); // 応答に追加データが不要な場合はNULLを指定
+
+            if (err != ESP_OK) {
+                ESP_LOGE(GATTS_TAG, "Send response error");
+            }
+
             if (!param->write.is_prep) {
                 // 実際の書き込みデータを取得
                 memcpy(char_value, param->write.value, param->write.len);
