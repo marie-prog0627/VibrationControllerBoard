@@ -13,23 +13,32 @@
 #include "esp_bt_device.h"
 #include "driver/gpio.h"
 #include "freertos/timers.h"
+#include "string.h"
 
 #define TIMER_PERIOD pdMS_TO_TICKS(5000) // 5000ms = 5秒
+#define SID 0x0121
 #define GATTS_TAG "BLE_GATTS"
 #define MY_DEVICE_NAME "VLE1"
-#define GAT_UUID 0x00A0
-#define GAT_NUM_HANDLE 2
+#define GAT_NUM_HANDLE 4
+#define GAT_UUID 0x0B1B
 
 static uint16_t id_conn = 0xFFFF; // 接続IDの初期値（未接続を示す）
 static esp_gatt_if_t if_gatt = ESP_GATT_IF_NONE; // インターフェースIDの初期値
 static uint16_t char_handle = 0; // 特性ハンドルの初期値
+static uint16_t gat_uuids = 0xFFFF;
+static uint8_t char_value[512]; // 受信データ
+
+esp_bt_uuid_t vib_uuid = {
+    .len = ESP_UUID_LEN_16,
+    .uuid.uuid16 = GAT_UUID,
+};
 
 esp_gatt_srvc_id_t service_id = {
     .id = {
-        .inst_id = 0x00,
+        .inst_id = 0x01,
             .uuid = {
                 .len = ESP_UUID_LEN_16,
-                .uuid = {.uuid16 = GAT_UUID,},
+                .uuid = {.uuid16 = SID,},
             },
         },
     .is_primary = true,
@@ -39,7 +48,6 @@ static esp_ble_adv_data_t adv_data = {
     .set_scan_rsp = false, // スキャン応答にこのアドバタイジングデータを使用しない
     .include_name = true, // アドバタイジングパケットにデバイス名を含める
     .include_txpower = false, // 送信電力レベルを含めない
-    // デバイス名を設定（必要に応じて変更してください）
     .manufacturer_len = 0, // メーカーデータは使用しない
     .p_manufacturer_data =  NULL, // メーカーデータポインタ
     .service_data_len = 0, // サービスデータは使用しない
@@ -58,6 +66,11 @@ esp_ble_adv_params_t adv_params = {
     .adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY,
 };
 
+esp_attr_value_t gatt_char_src = {
+    .attr_max_len = 512, // 最大値を適宜設定
+    .attr_len     = 0,   // 初期値の長さ
+    .attr_value   = NULL, // 初期値
+};
 
 void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param) {
     switch (event) {
@@ -82,6 +95,14 @@ static void gatts_event_handler(esp_gatts_cb_event_t event,
             esp_ble_gatts_create_service(if_gatt, &service_id, GAT_NUM_HANDLE);
             ESP_LOGI(GATTS_TAG, "Registered.\n");
             break;
+        case ESP_GATTS_CREATE_EVT:
+            ESP_LOGI(GATTS_TAG, "Created.\n");
+            esp_ble_gatts_add_char(param->create.service_handle, &vib_uuid,
+                                   ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE,
+                                   ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_WRITE | ESP_GATT_CHAR_PROP_BIT_NOTIFY,
+                                   &gatt_char_src, NULL);
+            esp_ble_gatts_start_service(param->create.service_handle);
+            break;
         case ESP_GATTS_START_EVT:
             ESP_LOGI(GATTS_TAG, "Started.\n");
             break;
@@ -91,7 +112,16 @@ static void gatts_event_handler(esp_gatts_cb_event_t event,
             break;
         case ESP_GATTS_ADD_CHAR_EVT:
             char_handle = param->add_char.attr_handle;
-            ESP_LOGI(GATTS_TAG, "Characteristic Added. \n");
+            gat_uuids = param->add_char.char_uuid.uuid.uuid16;
+            ESP_LOGI(GATTS_TAG, "Characteristic Added. id: %d, uuid %d \n", char_handle, gat_uuids);
+            break;
+        case ESP_GATTS_WRITE_EVT:
+            if (!param->write.is_prep) {
+                // 実際の書き込みデータを取得
+                memcpy(char_value, param->write.value, param->write.len);
+                // 受信したデータをシリアル出力にprint
+                ESP_LOGI(GATTS_TAG, "Received data: %.*s", param->write.len, char_value);
+            }
             break;
         case ESP_GATTS_DISCONNECT_EVT:
             ESP_LOGI(GATTS_TAG, "Disconnected.\n");
@@ -146,7 +176,7 @@ void bt_initialize() {
 
     esp_ble_gatts_register_callback(gatts_event_handler);
 
-    esp_ble_gatts_app_register(GAT_UUID);
+    esp_ble_gatts_app_register(SID);
 
     esp_ble_gap_set_device_name(MY_DEVICE_NAME);
     esp_ble_gap_register_callback(gap_event_handler);
