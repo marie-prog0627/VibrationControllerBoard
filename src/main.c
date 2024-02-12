@@ -18,18 +18,28 @@
 #include "driver/gpio.h"
 #include "stdlib.h"
 
-#define TIMER_PERIOD pdMS_TO_TICKS(5000) // 5000ms = 5秒
+#define TIMER_PERIOD pdMS_TO_TICKS(10) // timerの設定。最小10ms
+#define CONTINUS_NUM 10 // timerの設定に合わせた同時処理のchunk数。最小10
+#define UNIT_TIME pdMS_TO_TICKS(1) // microsec max 1000Hz
 #define SID 0x0121
 #define GATTS_TAG "BLE_GATTS"
 #define MY_DEVICE_NAME "VLE1"
 #define GAT_NUM_HANDLE 4
 #define GAT_UUID 0x0B1B
+#define CHUNK 100
+
+// pre-decleared func
+void pwm_control(u_int8_t duty);
+void timer_callback(TimerHandle_t xTimer);
+
+// variable
 
 static uint16_t id_conn = 0xFFFF; // 接続IDの初期値（未接続を示す）
 static esp_gatt_if_t if_gatt = ESP_GATT_IF_NONE; // インターフェースIDの初期値
 static uint16_t char_handle = 0; // 特性ハンドルの初期値
 static uint16_t gat_uuids = 0xFFFF;
 static uint8_t char_value[512]; // 受信データ
+int count = 0;
 
 esp_bt_uuid_t vib_uuid = {
     .len = ESP_UUID_LEN_16,
@@ -93,6 +103,8 @@ ledc_channel_config_t ledc_channel = {
     .timer_sel  = LEDC_TIMER_0
 };
 
+TimerHandle_t timer;
+
 // --- function
 
 void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param) {
@@ -153,13 +165,9 @@ static void gatts_event_handler(esp_gatts_cb_event_t event,
                 // 実際の書き込みデータを取得
                 memcpy(char_value, param->write.value, param->write.len);
                 // 受信したデータをシリアル出力にprint
-                ESP_LOGI(GATTS_TAG, "Received data: %.*s", param->write.len, char_value);
+                // ESP_LOGI(GATTS_TAG, "Received data: %.*s", param->write.len, char_value);
 
-                int duty = atoi((const char *)char_value);
-
-                ledc_set_duty(ledc_channel.speed_mode, ledc_channel.channel, duty);
-                ledc_update_duty(ledc_channel.speed_mode, ledc_channel.channel);
-
+                xTimerStart(timer, 0);
             }
             break;
         case ESP_GATTS_DISCONNECT_EVT:
@@ -169,12 +177,6 @@ static void gatts_event_handler(esp_gatts_cb_event_t event,
         default:
             break;
     }
-}
-
-void timer_callback(TimerHandle_t xTimer) {
-    char message[] = "Hello from ESP32!";
-    esp_ble_gatts_send_indicate(if_gatt, id_conn, char_handle,
-                                sizeof(message), (uint8_t *)message, false);
 }
 
 void bt_initialize() {
@@ -227,6 +229,28 @@ void pwm_initialize() {
     ledc_channel_config(&ledc_channel);
 }
 
+void pwm_control(u_int8_t duty) {
+    ledc_set_duty(ledc_channel.speed_mode, ledc_channel.channel, duty);
+    ledc_update_duty(ledc_channel.speed_mode, ledc_channel.channel);
+}
+
+void timer_callback(TimerHandle_t xTimer) {
+    int initial_count = count;
+    while(count - initial_count < CONTINUS_NUM) {
+        pwm_control(char_value[count]);
+        count++;
+
+        if(count >= CHUNK) {
+            count = 0;
+            xTimerStop(xTimer, 0);
+
+            break;
+        }
+
+        vTaskDelay(UNIT_TIME);
+    }
+}
+
 void app_main(void) {
 
     sleep(10);
@@ -234,6 +258,5 @@ void app_main(void) {
     bt_initialize();
     pwm_initialize();
 
-    // TimerHandle_t timer = xTimerCreate("msgTimer", TIMER_PERIOD, pdTRUE, (void *)0, timer_callback);
-    // xTimerStart(timer, 0);
+    timer = xTimerCreate("PWMTimer", TIMER_PERIOD, pdTRUE, (void *)0, timer_callback);
 }
