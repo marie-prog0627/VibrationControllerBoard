@@ -17,10 +17,11 @@
 #include "driver/ledc.h"
 #include "driver/gpio.h"
 #include "stdlib.h"
+#include "rom/ets_sys.h"
 
 #define TIMER_PERIOD pdMS_TO_TICKS(10) // timerの設定。最小10ms
 #define CONTINUS_NUM 10 // timerの設定に合わせた同時処理のchunk数。最小10
-#define UNIT_TIME pdMS_TO_TICKS(1) // microsec max 1000Hz
+#define DELAY 1000
 #define SID 0x0121
 #define GATTS_TAG "BLE_GATTS"
 #define MY_DEVICE_NAME "VLE1"
@@ -229,7 +230,8 @@ void pwm_initialize() {
     ledc_channel_config(&ledc_channel);
 }
 
-void pwm_control(u_int8_t duty) {
+void pwm_control(u_int8_t d) {
+    uint32_t duty = 4 * d;
     ledc_set_duty(ledc_channel.speed_mode, ledc_channel.channel, duty);
     ledc_update_duty(ledc_channel.speed_mode, ledc_channel.channel);
 }
@@ -247,7 +249,7 @@ void timer_callback(TimerHandle_t xTimer) {
             break;
         }
 
-        vTaskDelay(UNIT_TIME);
+        ets_delay_us(DELAY);
     }
 }
 
