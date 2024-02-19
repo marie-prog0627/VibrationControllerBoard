@@ -22,7 +22,7 @@
 #define TIMER_PERIOD pdMS_TO_TICKS(10) // timerの設定。最小10ms
 #define CONTINUS_NUM 10 // timerの設定に合わせた同時処理のchunk数。最小10
 #define UNIT_TIME pdMS_TO_TICKS(1) // 1ms
-#define DELAY 950 // timerに若干重ならない程度のusを設定する
+#define DELAY 900 // timerに若干重ならない程度のusを設定する
 #define SID 0x0121
 #define GATTS_TAG "BLE_GATTS"
 #define MY_DEVICE_NAME "VLE1"
