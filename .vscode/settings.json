@@ -5,6 +5,8 @@
         "esp_gap_ble_api.h": "c",
         "ledc.h": "c",
         "gpio.h": "c",
-        "stdlib.h": "c"
-    }
+        "stdlib.h": "c",
+        "i2s.h": "c"
+    },
+    "cmake.configureOnOpen": false
 }

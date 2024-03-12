@@ -18,20 +18,22 @@
 #include "driver/gpio.h"
 #include "stdlib.h"
 #include "rom/ets_sys.h"
+#include "driver/i2s.h"
 
-#define TIMER_PERIOD pdMS_TO_TICKS(10) // timerの設定。最小10ms
-#define CONTINUS_NUM 10 // timerの設定に合わせた同時処理のchunk数。最小10
-#define UNIT_TIME pdMS_TO_TICKS(1) // 1ms
-#define DELAY 900 // timerに若干重ならない程度のusを設定する
 #define SID 0x0121
 #define GATTS_TAG "BLE_GATTS"
 #define MY_DEVICE_NAME "VLE1"
 #define GAT_NUM_HANDLE 4
 #define GAT_UUID 0x0B1B
 #define CHUNK 100
+#define TIMER_PERIOD pdMS_TO_TICKS(100) // timerの設定。最小10ms
+#define I2S_SAMPLE_RATE 8000 // これ以上低下させることは不可能
+#define I2S_NUM 0
+#define I2S_DO_IO 1
+#define I2S_BCK_IO 2
+#define I2S_WS_IO 3
 
 // pre-decleared func
-void pwm_control(u_int8_t duty);
 void timer_callback(TimerHandle_t xTimer);
 
 // variable
@@ -41,7 +43,7 @@ static esp_gatt_if_t if_gatt = ESP_GATT_IF_NONE; // インターフェースID�
 static uint16_t char_handle = 0; // 特性ハンドルの初期値
 static uint16_t gat_uuids = 0xFFFF;
 static uint8_t char_value[512]; // 受信データ
-int count = 0;
+int len = 0;
 
 esp_bt_uuid_t vib_uuid = {
     .len = ESP_UUID_LEN_16,
@@ -103,6 +105,26 @@ ledc_channel_config_t ledc_channel = {
     .speed_mode = LEDC_LOW_SPEED_MODE,
     .hpoint     = 0,
     .timer_sel  = LEDC_TIMER_0
+};
+
+i2s_config_t i2s_config = {
+    .mode = I2S_MODE_MASTER | I2S_MODE_TX, // マスターモードで送信のみ    
+    .sample_rate = I2S_SAMPLE_RATE,
+    .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT, // サンプルあたりのビット数 これ以上低下させること不可能
+    .channel_format = I2S_CHANNEL_FMT_ONLY_RIGHT, // ステレオ
+    .communication_format = I2S_COMM_FORMAT_I2S | I2S_COMM_FORMAT_I2S_MSB,
+    .intr_alloc_flags = 1, // 割り込みの割り当てフラグ（デフォルト）
+    .dma_buf_count = 8,
+    .dma_buf_len = 64,
+    .use_apll = false,
+    .tx_desc_auto_clear = true // DMAのアンダーラン時に前のサンプルを送信
+};
+
+i2s_pin_config_t pin_config = {
+    .bck_io_num = I2S_BCK_IO,
+    .ws_io_num = I2S_WS_IO,
+    .data_out_num = I2S_DO_IO,
+    .data_in_num = -1 // 不使用
 };
 
 TimerHandle_t timer;
@@ -167,7 +189,6 @@ static void gatts_event_handler(esp_gatts_cb_event_t event,
                 // 実際の書き込みデータを取得
                 memcpy(char_value, param->write.value, param->write.len);
                 // 受信したデータをシリアル出力にprint
-                // ESP_LOGI(GATTS_TAG, "Received data: %.*s", param->write.len, char_value);
 
                 xTimerStart(timer, 0);
             }
@@ -237,21 +258,21 @@ void pwm_control(u_int8_t d) {
     ledc_update_duty(ledc_channel.speed_mode, ledc_channel.channel);
 }
 
+void i2s_initialize() {
+    i2s_driver_install(I2S_NUM, &i2s_config, 0, NULL);
+    i2s_set_pin(I2S_NUM, &pin_config);
+}
+
 void timer_callback(TimerHandle_t xTimer) {
-    int initial_count = count;
-    while(count - initial_count < CONTINUS_NUM) {
-        pwm_control(char_value[count]);
-        count++;
+    size_t bytes_written;
+    esp_err_t ret = i2s_write(I2S_NUM, &char_value, CHUNK * sizeof(uint8_t), &bytes_written, TIMER_PERIOD);
 
-        if(count >= CHUNK) {
-            count = 0;
-            xTimerStop(xTimer, 0);
-
-            break;
-        }
-
-        ets_delay_us(DELAY);
+    if (ret != ESP_OK) {
+        ESP_LOGE(GATTS_TAG, "i2s failed: %s", esp_err_to_name(ret));
+        return;
     }
+
+    xTimerStop(timer, 0);
 }
 
 void app_main(void) {
@@ -259,7 +280,7 @@ void app_main(void) {
     sleep(10);
 
     bt_initialize();
-    pwm_initialize();
+    i2s_initialize();
 
     timer = xTimerCreate("PWMTimer", TIMER_PERIOD, pdTRUE, (void *)0, timer_callback);
 }
